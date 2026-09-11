@@ -1,0 +1,219 @@
+// Prisma schema for the Streaming Platform MVP.
+// See specs/001-streaming-platform-mvp/data-model.md for the source design and rationale.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Accounts (T010)
+// ---------------------------------------------------------------------------
+
+enum Role {
+  USER
+  ADMIN
+}
+
+model User {
+  id            String   @id @default(uuid())
+  email         String   @unique
+  passwordHash  String
+  role          Role     @default(USER)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  subscriptions Subscription[]
+  transactions  Transaction[]
+  refreshTokens RefreshToken[]
+
+  @@map("users")
+}
+
+// A rotating refresh-token record backing Constitution Principle IV (short-lived access token +
+// rotating refresh token). Storing the token's hash (not the raw token) lets us detect reuse of
+// a revoked token and revoke the whole family if that happens.
+model RefreshToken {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model Genre {
+  id    String @id @default(uuid())
+  name  String @unique
+
+  titles TitleGenre[]
+
+  @@map("genres")
+}
+
+// ---------------------------------------------------------------------------
+// Catalog (T011)
+// ---------------------------------------------------------------------------
+
+enum TitleType {
+  MOVIE
+  SERIES
+}
+
+model Title {
+  id          String    @id @default(uuid())
+  type        TitleType
+  name        String
+  description String
+  posterUrl   String
+  published   Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  genres  TitleGenre[]
+  seasons Season[]
+
+  @@index([published, type])
+  @@map("titles")
+}
+
+model TitleGenre {
+  titleId String
+  title   Title  @relation(fields: [titleId], references: [id], onDelete: Cascade)
+  genreId String
+  genre   Genre  @relation(fields: [genreId], references: [id], onDelete: Cascade)
+
+  @@id([titleId, genreId])
+  @@map("title_genres")
+}
+
+model Season {
+  id       String @id @default(uuid())
+  titleId  String
+  title    Title  @relation(fields: [titleId], references: [id], onDelete: Cascade)
+  number   Int
+
+  episodes Episode[]
+
+  @@unique([titleId, number])
+  @@map("seasons")
+}
+
+model Episode {
+  id          String   @id @default(uuid())
+  seasonId    String
+  season      Season   @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  number      Int
+  name        String
+  description String
+  published   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([seasonId, number])
+  @@map("episodes")
+}
+
+// ---------------------------------------------------------------------------
+// Media (T012)
+// ---------------------------------------------------------------------------
+
+enum MediaOwnerType {
+  TITLE
+  EPISODE
+}
+
+enum MediaKind {
+  TRAILER
+  FULL
+}
+
+enum ProcessingStatus {
+  PENDING
+  READY
+  FAILED
+}
+
+model MediaAsset {
+  id                String           @id @default(uuid())
+  ownerType         MediaOwnerType
+  // Polymorphic reference to Title.id or Episode.id depending on ownerType. Prisma cannot
+  // express a single FK across two target tables, so referential integrity for ownerId is
+  // enforced at the application layer (see AdminMediaService) rather than by the database.
+  ownerId           String
+  kind              MediaKind
+  processingStatus  ProcessingStatus @default(PENDING)
+  sourceObjectKey   String
+  hlsManifestKey    String?
+  durationSeconds   Int?
+  failureReason     String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  // At most one TRAILER and one FULL asset per (ownerType, ownerId) — data-model.md validation.
+  @@unique([ownerType, ownerId, kind])
+  @@index([ownerType, ownerId])
+  @@map("media_assets")
+}
+
+// ---------------------------------------------------------------------------
+// Subscriptions & Payments (T013)
+// ---------------------------------------------------------------------------
+
+enum SubscriptionStatus {
+  ACTIVE
+  EXPIRED
+}
+
+model Subscription {
+  id            String             @id @default(uuid())
+  userId        String
+  user          User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status        SubscriptionStatus
+  startAt       DateTime
+  expiresAt     DateTime
+  transactionId String             @unique
+  transaction   Transaction        @relation(fields: [transactionId], references: [id])
+  createdAt     DateTime           @default(now())
+
+  @@index([userId, status, expiresAt])
+  @@map("subscriptions")
+}
+
+enum PaymentMethod {
+  MPESA
+  BANK_GATEWAY
+}
+
+enum TransactionStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  TIMED_OUT
+}
+
+model Transaction {
+  id                 String            @id @default(uuid())
+  userId             String
+  user               User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  method             PaymentMethod
+  amount             Decimal           @db.Decimal(10, 2)
+  status             TransactionStatus @default(PENDING)
+  providerReference  String?           @unique
+  initiatedAt        DateTime          @default(now())
+  resolvedAt         DateTime?
+  failureReason      String?
+
+  subscription Subscription?
+
+  @@index([userId, status])
+  @@map("transactions")
+}
