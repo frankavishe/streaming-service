@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build output
+dist/
+build/
+.next/
+out/
+
+# Env files
+.env
+.env.local
+.env.*.local
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Coding agent local/machine-specific state (credentials, local settings) —
+# but keep .claude/skills/ tracked so the spec-kit slash commands ship with the repo
+.claude/settings.local.json
+.claude/*.local.json
+
+# Docker volumes data (if bind-mounted locally)
+docker/volumes/
+
+# Coverage
+coverage/
